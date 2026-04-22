@@ -3,7 +3,7 @@ import { Show, splitProps, type JSX } from "solid-js"
 import type { ComponentProps, ParentProps, Component } from "solid-js"
 
 export interface TabsProps extends ComponentProps<typeof Kobalte> {
-  variant?: "normal" | "alt" | "settings"
+  variant?: "normal" | "alt" | "pill" | "settings"
   orientation?: "horizontal" | "vertical"
 }
 export interface TabsListProps extends ComponentProps<typeof Kobalte.List> {}
@@ -27,7 +27,7 @@ function TabsRoot(props: TabsProps) {
       data-variant={split.variant || "normal"}
       data-orientation={split.orientation || "horizontal"}
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
       }}
     />
@@ -41,7 +41,7 @@ function TabsList(props: TabsListProps) {
       {...rest}
       data-slot="tabs-list"
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
       }}
     />
@@ -61,9 +61,15 @@ function TabsTrigger(props: ParentProps<TabsTriggerProps>) {
   return (
     <div
       data-slot="tabs-trigger-wrapper"
+      data-value={props.value}
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 1 && split.onMiddleClick) {
+          e.preventDefault()
+        }
       }}
       onAuxClick={(e) => {
         if (e.button === 1 && split.onMiddleClick) {
@@ -75,7 +81,8 @@ function TabsTrigger(props: ParentProps<TabsTriggerProps>) {
       <Kobalte.Trigger
         {...rest}
         data-slot="tabs-trigger"
-        classList={{ "group/tab": true, [split.classes?.button ?? ""]: split.classes?.button }}
+        data-value={props.value}
+        classList={{ [split.classes?.button ?? ""]: split.classes?.button }}
       >
         {split.children}
       </Kobalte.Trigger>
@@ -97,7 +104,7 @@ function TabsContent(props: ParentProps<TabsContentProps>) {
       {...rest}
       data-slot="tabs-content"
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
       }}
     >

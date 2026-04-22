@@ -1,5 +1,6 @@
 import type { Argv, InferredOptionTypes } from "yargs"
-import { Config } from "../config/config"
+import { Config } from "../config"
+import { AppRuntime } from "@/effect/app-runtime"
 
 const options = {
   port: {
@@ -17,6 +18,11 @@ const options = {
     describe: "enable mDNS service discovery (defaults hostname to 0.0.0.0)",
     default: false,
   },
+  "mdns-domain": {
+    type: "string" as const,
+    describe: "custom domain name for mDNS service (default: opencode.local)",
+    default: "opencode.local",
+  },
   cors: {
     type: "string" as const,
     array: true,
@@ -30,15 +36,18 @@ export type NetworkOptions = InferredOptionTypes<typeof options>
 export function withNetworkOptions<T>(yargs: Argv<T>) {
   return yargs.options(options)
 }
-
 export async function resolveNetworkOptions(args: NetworkOptions) {
-  const config = await Config.global()
+  const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal()))
+  return resolveNetworkOptionsNoConfig(args, config)
+}
+
+export function resolveNetworkOptionsNoConfig(args: NetworkOptions, config?: Config.Info) {
   const portExplicitlySet = process.argv.includes("--port")
   const hostnameExplicitlySet = process.argv.includes("--hostname")
   const mdnsExplicitlySet = process.argv.includes("--mdns")
-  const corsExplicitlySet = process.argv.includes("--cors")
-
+  const mdnsDomainExplicitlySet = process.argv.includes("--mdns-domain")
   const mdns = mdnsExplicitlySet ? args.mdns : (config?.server?.mdns ?? args.mdns)
+  const mdnsDomain = mdnsDomainExplicitlySet ? args["mdns-domain"] : (config?.server?.mdnsDomain ?? args["mdns-domain"])
   const port = portExplicitlySet ? args.port : (config?.server?.port ?? args.port)
   const hostname = hostnameExplicitlySet
     ? args.hostname
@@ -49,5 +58,5 @@ export async function resolveNetworkOptions(args: NetworkOptions) {
   const argsCors = Array.isArray(args.cors) ? args.cors : args.cors ? [args.cors] : []
   const cors = [...configCors, ...argsCors]
 
-  return { hostname, port, mdns, cors }
+  return { hostname, port, mdns, mdnsDomain, cors }
 }
