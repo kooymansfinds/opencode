@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store"
-import { createMemo, For, Show } from "solid-js"
+import { createMemo, createSignal, For, Show } from "solid-js"
 import { useKeyboard } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { useKeybind } from "../../context/keybind"
@@ -19,6 +19,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   const questions = createMemo(() => props.request.questions)
   const single = createMemo(() => questions().length === 1 && questions()[0]?.multiple !== true)
   const tabs = createMemo(() => (single() ? 1 : questions().length + 1)) // questions + confirm tab (no confirm for single select)
+  const [tabHover, setTabHover] = createSignal<number | "confirm" | null>(null)
   const [store, setStore] = createStore({
     tab: 0,
     answers: [] as QuestionAnswer[],
@@ -44,14 +45,14 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
 
   function submit() {
     const answers = questions().map((_, i) => store.answers[i] ?? [])
-    sdk.client.question.reply({
+    void sdk.client.question.reply({
       requestID: props.request.id,
       answers,
     })
   }
 
   function reject() {
-    sdk.client.question.reject({
+    void sdk.client.question.reject({
       requestID: props.request.id,
     })
   }
@@ -66,7 +67,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       setStore("custom", inputs)
     }
     if (single()) {
-      sdk.client.question.reply({
+      void sdk.client.question.reply({
         requestID: props.request.id,
         answers: [[answer]],
       })
@@ -269,7 +270,15 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                   <box
                     paddingLeft={1}
                     paddingRight={1}
-                    backgroundColor={isActive() ? theme.accent : theme.backgroundElement}
+                    backgroundColor={
+                      isActive()
+                        ? theme.accent
+                        : tabHover() === index()
+                          ? theme.backgroundElement
+                          : theme.backgroundPanel
+                    }
+                    onMouseOver={() => setTabHover(index())}
+                    onMouseOut={() => setTabHover(null)}
                     onMouseUp={() => selectTab(index())}
                   >
                     <text
@@ -290,7 +299,11 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
             <box
               paddingLeft={1}
               paddingRight={1}
-              backgroundColor={confirm() ? theme.accent : theme.backgroundElement}
+              backgroundColor={
+                confirm() ? theme.accent : tabHover() === "confirm" ? theme.backgroundElement : theme.backgroundPanel
+              }
+              onMouseOver={() => setTabHover("confirm")}
+              onMouseOut={() => setTabHover(null)}
               onMouseUp={() => selectTab(questions().length)}
             >
               <text fg={confirm() ? selectedForeground(theme, theme.accent) : theme.textMuted}>Confirm</text>
@@ -367,6 +380,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                       <textarea
                         ref={(val: TextareaRenderable) => {
                           textarea = val
+                          val.traits = { status: "ANSWER" }
                           queueMicrotask(() => {
                             val.focus()
                             val.gotoLineEnd()
@@ -374,6 +388,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                         }}
                         initialValue={input()}
                         placeholder="Type your own answer"
+                        placeholderColor={theme.textMuted}
                         minHeight={1}
                         maxHeight={6}
                         textColor={theme.text}

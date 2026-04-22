@@ -2,7 +2,7 @@ import { TextareaRenderable, TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useDialog, type DialogContext } from "./dialog"
 import { createStore } from "solid-js/store"
-import { onMount, Show, type JSX } from "solid-js"
+import { onMount, Show } from "solid-js"
 import { useKeyboard } from "@opentui/solid"
 
 export type DialogExportOptionsProps = {
@@ -56,7 +56,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
       setStore("active", order[nextIndex])
       evt.preventDefault()
     }
-    if (evt.name === "space") {
+    if (evt.name === "space" || evt.name === " ") {
       if (store.active === "thinking") setStore("thinking", !store.thinking)
       if (store.active === "toolDetails") setStore("toolDetails", !store.toolDetails)
       if (store.active === "assistantMetadata") setStore("assistantMetadata", !store.assistantMetadata)
@@ -68,6 +68,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
   onMount(() => {
     dialog.setSize("medium")
     setTimeout(() => {
+      if (!textarea || textarea.isDestroyed) return
       textarea.focus()
     }, 1)
     textarea.gotoLineEnd()
@@ -79,7 +80,9 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           Export Options
         </text>
-        <text fg={theme.textMuted}>esc</text>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+          esc
+        </text>
       </box>
       <box gap={1}>
         <box>
@@ -97,9 +100,13 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
           }}
           height={3}
           keyBindings={[{ name: "return", action: "submit" }]}
-          ref={(val: TextareaRenderable) => (textarea = val)}
+          ref={(val: TextareaRenderable) => {
+            textarea = val
+            val.traits = { status: "FILENAME" }
+          }}
           initialValue={props.defaultFilename}
           placeholder="Enter filename"
+          placeholderColor={theme.textMuted}
           textColor={theme.text}
           focusedTextColor={theme.text}
           cursorColor={theme.text}

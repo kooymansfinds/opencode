@@ -1,121 +1,23 @@
 import "./index.css"
-import { Title, Meta, Link } from "@solidjs/meta"
-import { createAsync, query } from "@solidjs/router"
+import { Title, Meta } from "@solidjs/meta"
+import { createAsync } from "@solidjs/router"
 import { Header } from "~/component/header"
 import { Footer } from "~/component/footer"
 import { Legal } from "~/component/legal"
-import { config } from "~/config"
+import { changelog } from "~/lib/changelog"
+import type { HighlightGroup } from "~/lib/changelog"
 import { For, Show, createSignal } from "solid-js"
+import { useI18n } from "~/context/i18n"
+import { useLanguage } from "~/context/language"
+import { LocaleLinks } from "~/component/locale-links"
 
-type Release = {
-  tag_name: string
-  name: string
-  body: string
-  published_at: string
-  html_url: string
-}
-
-const getReleases = query(async () => {
-  "use server"
-  const response = await fetch("https://api.github.com/repos/anomalyco/opencode/releases?per_page=20", {
-    headers: {
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "OpenCode-Console",
-    },
-    cf: {
-      cacheTtl: 60 * 5,
-      cacheEverything: true,
-    },
-  } as any)
-  if (!response.ok) return []
-  return response.json() as Promise<Release[]>
-}, "releases.get")
-
-function formatDate(dateString: string) {
+function formatDate(dateString: string, locale: string) {
   const date = new Date(dateString)
-  return date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString(locale, {
     year: "numeric",
     month: "short",
     day: "numeric",
   })
-}
-
-type HighlightMedia = { type: "video"; src: string } | { type: "image"; src: string; width: string; height: string }
-
-type HighlightItem = {
-  title: string
-  description: string
-  shortDescription?: string
-  media: HighlightMedia
-}
-
-type HighlightGroup = {
-  source: string
-  items: HighlightItem[]
-}
-
-function parseHighlights(body: string): HighlightGroup[] {
-  const groups = new Map<string, HighlightItem[]>()
-  const regex = /<highlight\s+source="([^"]+)">([\s\S]*?)<\/highlight>/g
-  let match
-
-  while ((match = regex.exec(body)) !== null) {
-    const source = match[1]
-    const content = match[2]
-
-    const titleMatch = content.match(/<h2>([^<]+)<\/h2>/)
-    const pMatch = content.match(/<p(?:\s+short="([^"]*)")?>([^<]+)<\/p>/)
-    const imgMatch = content.match(/<img\s+width="([^"]+)"\s+height="([^"]+)"\s+alt="[^"]*"\s+src="([^"]+)"/)
-    const videoMatch = content.match(/^\s*(https:\/\/github\.com\/user-attachments\/assets\/[a-f0-9-]+)\s*$/m)
-
-    let media: HighlightMedia | undefined
-    if (videoMatch) {
-      media = { type: "video", src: videoMatch[1] }
-    } else if (imgMatch) {
-      media = { type: "image", src: imgMatch[3], width: imgMatch[1], height: imgMatch[2] }
-    }
-
-    if (titleMatch && media) {
-      const item: HighlightItem = {
-        title: titleMatch[1],
-        description: pMatch?.[2] || "",
-        shortDescription: pMatch?.[1],
-        media,
-      }
-
-      if (!groups.has(source)) {
-        groups.set(source, [])
-      }
-      groups.get(source)!.push(item)
-    }
-  }
-
-  return Array.from(groups.entries()).map(([source, items]) => ({ source, items }))
-}
-
-function parseMarkdown(body: string) {
-  const lines = body.split("\n")
-  const sections: { title: string; items: string[] }[] = []
-  let current: { title: string; items: string[] } | null = null
-  let skip = false
-
-  for (const line of lines) {
-    if (line.startsWith("## ")) {
-      if (current) sections.push(current)
-      const title = line.slice(3).trim()
-      current = { title, items: [] }
-      skip = false
-    } else if (line.startsWith("**Thank you")) {
-      skip = true
-    } else if (line.startsWith("- ") && !skip) {
-      current?.items.push(line.slice(2).trim())
-    }
-  }
-  if (current) sections.push(current)
-
-  const highlights = parseHighlights(body)
-
-  return { sections, highlights }
 }
 
 function ReleaseItem(props: { item: string }) {
@@ -197,48 +99,56 @@ function CollapsibleSections(props: { sections: { title: string; items: string[]
 }
 
 export default function Changelog() {
-  const releases = createAsync(() => getReleases())
+  const i18n = useI18n()
+  const language = useLanguage()
+  const data = createAsync(() => changelog())
+  const releases = () => data() ?? []
 
   return (
     <main data-page="changelog">
-      <Title>OpenCode | Changelog</Title>
-      <Link rel="canonical" href={`${config.baseUrl}/changelog`} />
-      <Meta name="description" content="OpenCode release notes and changelog" />
+      <Title>{i18n.t("changelog.title")}</Title>
+      <LocaleLinks path="/changelog" />
+      <Meta name="description" content={i18n.t("changelog.meta.description")} />
 
       <div data-component="container">
         <Header />
 
         <div data-component="content">
           <section data-component="changelog-hero">
-            <h1>Changelog</h1>
-            <p>New updates and improvements to OpenCode</p>
+            <h1>{i18n.t("changelog.hero.title")}</h1>
+            <p>{i18n.t("changelog.hero.subtitle")}</p>
           </section>
 
           <section data-component="releases">
+            <Show when={releases().length === 0}>
+              <p>
+                {i18n.t("changelog.empty")}{" "}
+                <a href={language.route("/changelog.json")}>{i18n.t("changelog.viewJson")}</a>
+              </p>
+            </Show>
             <For each={releases()}>
               {(release) => {
-                const parsed = () => parseMarkdown(release.body || "")
                 return (
                   <article data-component="release">
                     <header>
                       <div data-slot="version">
-                        <a href={release.html_url} target="_blank" rel="noopener noreferrer">
-                          {release.tag_name}
+                        <a href={release.url} target="_blank" rel="noopener noreferrer">
+                          {release.tag}
                         </a>
                       </div>
-                      <time dateTime={release.published_at}>{formatDate(release.published_at)}</time>
+                      <time dateTime={release.date}>{formatDate(release.date, language.tag(language.locale()))}</time>
                     </header>
                     <div data-slot="content">
-                      <Show when={parsed().highlights.length > 0}>
+                      <Show when={release.highlights.length > 0}>
                         <div data-component="highlights">
-                          <For each={parsed().highlights}>{(group) => <HighlightSection group={group} />}</For>
+                          <For each={release.highlights}>{(group) => <HighlightSection group={group} />}</For>
                         </div>
                       </Show>
-                      <Show when={parsed().highlights.length > 0 && parsed().sections.length > 0}>
-                        <CollapsibleSections sections={parsed().sections} />
+                      <Show when={release.highlights.length > 0 && release.sections.length > 0}>
+                        <CollapsibleSections sections={release.sections} />
                       </Show>
-                      <Show when={parsed().highlights.length === 0}>
-                        <For each={parsed().sections}>
+                      <Show when={release.highlights.length === 0}>
+                        <For each={release.sections}>
                           {(section) => (
                             <div data-component="section">
                               <h3>{section.title}</h3>
@@ -255,9 +165,9 @@ export default function Changelog() {
               }}
             </For>
           </section>
-
-          <Footer />
         </div>
+
+        <Footer />
       </div>
 
       <Legal />
