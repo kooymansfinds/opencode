@@ -18,6 +18,7 @@ import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Schema, Types } from "effect"
 import { zod, ZodOverride } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
+import { namedSchemaError } from "@/util/named-schema-error"
 import { EffectLogger } from "@/effect"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -30,38 +31,29 @@ interface FetchDecompressionError extends Error {
 export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached image(s) from tool result:"
 export { isMedia }
 
-export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
-export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
-export const StructuredOutputError = NamedError.create(
-  "StructuredOutputError",
-  z.object({
-    message: z.string(),
-    retries: z.number(),
-  }),
-)
-export const AuthError = NamedError.create(
-  "ProviderAuthError",
-  z.object({
-    providerID: z.string(),
-    message: z.string(),
-  }),
-)
-export const APIError = NamedError.create(
-  "APIError",
-  z.object({
-    message: z.string(),
-    statusCode: z.number().optional(),
-    isRetryable: z.boolean(),
-    responseHeaders: z.record(z.string(), z.string()).optional(),
-    responseBody: z.string().optional(),
-    metadata: z.record(z.string(), z.string()).optional(),
-  }),
-)
+export const OutputLengthError = namedSchemaError("MessageOutputLengthError", {})
+export const AbortedError = namedSchemaError("MessageAbortedError", { message: Schema.String })
+export const StructuredOutputError = namedSchemaError("StructuredOutputError", {
+  message: Schema.String,
+  retries: Schema.Number,
+})
+export const AuthError = namedSchemaError("ProviderAuthError", {
+  providerID: Schema.String,
+  message: Schema.String,
+})
+export const APIError = namedSchemaError("APIError", {
+  message: Schema.String,
+  statusCode: Schema.optional(Schema.Number),
+  isRetryable: Schema.Boolean,
+  responseHeaders: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  responseBody: Schema.optional(Schema.String),
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
 export type APIError = z.infer<typeof APIError.Schema>
-export const ContextOverflowError = NamedError.create(
-  "ContextOverflowError",
-  z.object({ message: z.string(), responseBody: z.string().optional() }),
-)
+export const ContextOverflowError = namedSchemaError("ContextOverflowError", {
+  message: Schema.String,
+  responseBody: Schema.optional(Schema.String),
+})
 
 export class OutputFormatText extends Schema.Class<OutputFormatText>("OutputFormatText")({
   type: Schema.Literal("text"),
@@ -326,6 +318,12 @@ export const ToolStateCompleted = Schema.Struct({
   .annotate({ identifier: "ToolStateCompleted" })
   .pipe(withStatics((s) => ({ zod: zod(s) })))
 export type ToolStateCompleted = Types.DeepMutable<Schema.Schema.Type<typeof ToolStateCompleted>>
+
+function truncateToolOutput(text: string, maxChars?: number) {
+  if (!maxChars || text.length <= maxChars) return text
+  const omitted = text.length - maxChars
+  return `${text.slice(0, maxChars)}\n[Tool output truncated for compaction: omitted ${omitted} chars]`
+}
 
 export const ToolStateError = Schema.Struct({
   status: Schema.Literal("error"),
@@ -638,18 +636,20 @@ export type WithParts = {
   parts: Part[]
 }
 
-const Cursor = z.object({
-  id: MessageID.zod,
-  time: z.number(),
+const Cursor = Schema.Struct({
+  id: MessageID,
+  time: Schema.Number,
 })
-type Cursor = z.infer<typeof Cursor>
+type Cursor = typeof Cursor.Type
+
+const decodeCursor = Schema.decodeUnknownSync(Cursor)
 
 export const cursor = {
   encode(input: Cursor) {
     return Buffer.from(JSON.stringify(input)).toString("base64url")
   },
   decode(input: string) {
-    return Cursor.parse(JSON.parse(Buffer.from(input, "base64url").toString("utf8")))
+    return decodeCursor(JSON.parse(Buffer.from(input, "base64url").toString("utf8")))
   },
 }
 
@@ -706,7 +706,7 @@ function providerMeta(metadata: Record<string, any> | undefined) {
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean },
+  options?: { stripMedia?: boolean; toolOutputMaxChars?: number },
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
@@ -845,7 +845,9 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         if (part.type === "tool") {
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
-            const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
+            const outputText = part.state.time.compacted
+              ? "[Old tool result content cleared]"
+              : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
             const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 
             // For providers that don't support media in tool results, extract media files
@@ -961,7 +963,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 export function toModelMessages(
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean },
+  options?: { stripMedia?: boolean; toolOutputMaxChars?: number },
 ): Promise<ModelMessage[]> {
   return Effect.runPromise(toModelMessagesEffect(input, model, options).pipe(Effect.provide(EffectLogger.layer)))
 }
